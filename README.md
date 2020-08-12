@@ -6,4 +6,4 @@ Coded by: Antonio Matos
 
 ## ESP8266 Pin Out  
 
-![ESP8266 Pin Out](https://github.com/acxmatos/micropython-tutorial/blob/master/esp8266-pinout.png)  
+![ESP8266 Pin Out](https://github.com/acxmatos/micropython-tutorial/blob/master/esp8266-pinout.jpg)  

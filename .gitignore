@@ -136,3 +136,6 @@ logs/
 
 # MicroPython firmwares
 *.bin
+
+# Wifi settings
+chapter4/config.py

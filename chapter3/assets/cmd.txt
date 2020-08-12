@@ -1,0 +1,7 @@
+Upload command:
+
+(venv) $ rshell --port <board serial port name> cp main.py /pyboard
+
+Remove command:
+
+(venv) $ rshell --port <board serial port name> rm /pyboard/main.py

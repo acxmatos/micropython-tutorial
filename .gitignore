@@ -136,10 +136,3 @@ logs/
 
 # MicroPython firmwares
 *.bin
-
-# SENSITIVE: Wifi settings
-chapter4/config.py
-
-# SENSITIVE: Wifi settings and ThingSpeak API key
-chapter5/config.py
-chapter5/config.py

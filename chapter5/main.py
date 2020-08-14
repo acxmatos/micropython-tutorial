@@ -197,7 +197,7 @@ def run():
         print('Running in endless loop')
 
         # Run forever
-        while(True):
+        while(not is_debug()):
 
             # Run single cycle
             run_cycle()

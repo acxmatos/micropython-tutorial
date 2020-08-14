@@ -2,6 +2,7 @@
 import sys
 import time
 import machine
+import micropython
 
 # Network
 import network
@@ -14,11 +15,6 @@ import framebuf
 
 # Config
 import config
-
-# Custom Fonts
-import freesans20
-import writer
-
 
 # -------------------------------------------------------------------------------------
 #                                  Network Handling
@@ -67,8 +63,8 @@ def connect_wifi():
 def log_data(temperature, humidity):
 
     # Call webhook to log the current temperature and humidity
-    print('Uploading measured data to cloud')
     url = config.WEBHOOK_URL.format(temperature=temperature, humidity=humidity)
+    print('Uploading measured data to cloud. URL:', url)
     response = urequests.get(url)
 
     # Any response code below 400 is considered success in this case
@@ -126,22 +122,43 @@ def show_error():
     blink_led(delay=0.5, times=3)
 
 
+def show_current_memory_usage():
+
+    # Report current memory usage
+    print('Current memory usage:')
+    micropython.mem_info()
+
+
 # -------------------------------------------------------------------------------------
 #                              Execution Flow Control
 # -------------------------------------------------------------------------------------
 
+def read_boolean_pin(pin):
+
+    # Is pin set to GND?
+    if machine.Pin(pin, machine.Pin.IN, machine.Pin.PULL_UP).value() == 0:
+        return True
+
+    return False
+
 
 def is_debug():
 
-    # Read debug pin
-    debug = machine.Pin(config.DEBUG_PIN, machine.Pin.IN, machine.Pin.PULL_UP)
-
-    # Check if debug pin is set to GND
-    if debug.value() == 0:
+    if read_boolean_pin(config.DEBUG_PIN):
         print('Debug mode enabled')
         return True
 
     print('Debug mode disabled')
+    return False
+
+
+def should_send_data_to_cloud():
+
+    if read_boolean_pin(config.SEND_DATA_TO_CLOUD_PIN):
+        print('Send data to cloud is ENABLED')
+        return True
+
+    print('Send data to cloud is DISABLED')
     return False
 
 
@@ -197,7 +214,22 @@ def get_temperature_and_humidity():
     return temperature, humidity
 
 
-def display_temperature_and_humidity(temperature, humidity):
+def display_temperature_and_humidity(temperature, humidity, use_normal_text):
+
+    # Note: This is conditionally imported to save memory.
+    #       Since we are running a bunch of different processes
+    #       (measuring using sensors, using wifi, sending data
+    #       to cloud, showing data in the display), all those
+    #       together made ESP8266 run out of memory when calling
+    #       the cloud API to send data. Since the custom font
+    #       processing is one of the most "memory consuming"
+    #       process, we use it only if we are not sending data
+    #       to cloud. If we do, we use normal text in the display
+    #
+    if not use_normal_text:
+        # Import required libraries
+        import freesans20
+        import writer
 
     # Initialize I2C interface using the setup display pins
     i2c = machine.I2C(scl=machine.Pin(config.DISPLAY_SCL_PIN),
@@ -216,7 +248,9 @@ def display_temperature_and_humidity(temperature, humidity):
     display = sh1106.SH1106_I2C(128, 64, i2c, machine.Pin(16), 0x3c)
 
     # Custom font writer
-    font_writer = writer.Writer(display, freesans20)
+    font_writer = None
+    if not use_normal_text:
+        font_writer = writer.Writer(display, freesans20)
 
     # Load PBM images
     temperature_pbm = load_image('temperature.pbm')
@@ -263,24 +297,39 @@ def display_temperature_and_humidity(temperature, humidity):
 
     # Format current temperature using custom fonts
     text = '{:.1f}'.format(temperature)
-    textlen = font_writer.stringlen(text)
-    font_writer.set_textpos((64 - textlen) // 2, 30)
-    font_writer.printstring(text)
+
+    if use_normal_text:
+        # Use normal text
+        display.text(text, (34 - len(text)) // 2, 30)
+    else:
+        # Use custom fonts
+        textlen = font_writer.stringlen(text)
+        font_writer.set_textpos((64 - textlen) // 2, 30)
+        font_writer.printstring(text)
 
     # Format current humidity using custom fonts
     text = '{:.1f}'.format(humidity)
-    textlen = font_writer.stringlen(text)
-    font_writer.set_textpos(64 + (64 - textlen) // 2, 30)
-    font_writer.printstring(text)
+
+    if use_normal_text:
+        # Use normal text
+        display.text(text, 64 + (34 - len(text)) // 2, 30)
+    else:
+        # Use custom fonts
+        textlen = font_writer.stringlen(text)
+        font_writer.set_textpos(64 + (64 - textlen) // 2, 30)
+        font_writer.printstring(text)
 
     # Show content
+    print('Showing content in the display')
     display.rotate(config.DISPLAY_ROTATE)
     display.show()
 
     # Wait 10 seconds
+    print('Waiting 10 seconds before display power off')
     time.sleep(10)
 
     # Power off display
+    print('Powering off display')
     display.poweroff()
 
 
@@ -316,22 +365,43 @@ def load_image(filename):
 
 def run_cycle():
 
+    print('=/=/=/==/=/=/==/=/=/= Cycle Begin =/=/=/==/=/=/==/=/=/=')
+
+    # Report memory usage on cycle begin
+    show_current_memory_usage()
+
     try:
-        # Connect to internet through wifi
-        connect_wifi()
+        # Note: we read the send data to cloud config pin only once per cycle,
+        #       and pass it along the program execution. Since during the same
+        #       cycle the program runs sleeps for different situations, we will
+        #       make sure the cycle will always run with the same setup, even if
+        #       the pin setup changes during the cycle execution
+        send_data_to_cloud = should_send_data_to_cloud()
 
         # Collect current temperature and humidity information
         temperature, humidity = get_temperature_and_humidity()
 
         # Display temperature and humidity information
-        display_temperature_and_humidity(temperature, humidity)
+        display_temperature_and_humidity(
+            temperature, humidity, send_data_to_cloud)
 
-        # Log current temperature and humidity to cloud service
-        log_data(temperature, humidity)
+        # Should we send data to cloud?
+        if send_data_to_cloud:
+
+            # Connect to internet through wifi
+            connect_wifi()
+
+            # Log current temperature and humidity to cloud service
+            log_data(temperature, humidity)
 
     except Exception as exc:
         sys.print_exception(exc)
         show_error()
+
+    # Report memory usage on cycle end
+    show_current_memory_usage()
+
+    print('=/=/=/==/=/=/==/=/=/= Cycle End =/=/=/==/=/=/==/=/=/=')
 
 
 def run():
@@ -358,6 +428,7 @@ def run():
             run_cycle()
 
             # Enter in sleep mode only if not in debug
+            print('Sleeping for {} second(s)'.format(config.LOG_INTERVAL))
             time.sleep(config.LOG_INTERVAL)
 
 
